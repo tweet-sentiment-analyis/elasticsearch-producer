@@ -10,15 +10,44 @@ import com.amazonaws.services.sqs.AmazonSQSClientBuilder;
 import com.amazonaws.services.sqs.model.DeleteMessageRequest;
 import com.amazonaws.services.sqs.model.Message;
 import com.amazonaws.services.sqs.model.ReceiveMessageRequest;
+import org.elasticsearch.action.bulk.BulkRequestBuilder;
+import org.elasticsearch.action.bulk.BulkResponse;
+import org.elasticsearch.client.IndicesAdminClient;
+import org.elasticsearch.client.transport.TransportClient;
+import org.elasticsearch.common.settings.Settings;
+import org.elasticsearch.common.transport.InetSocketTransportAddress;
+import org.elasticsearch.transport.client.PreBuiltTransportClient;
+import org.json.simple.JSONObject;
+import org.json.simple.parser.JSONParser;
+import org.json.simple.parser.ParseException;
 
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.util.List;
 
 public class Consumer extends Thread {
 
-    private AmazonSQS sqs;
+    public static final String INDEX_NAME = "twitter";
+    public static final String TYPE_NAME  = "tweet";
 
-    public Consumer() {
+    public static final String ES_HOST = "192.168.99.100";
+    public static final int    ES_PORT = 9200;
 
+    private AmazonSQS       sqs;
+    private TransportClient elasticsearchClient;
+    private JSONParser      parser;
+
+    public Consumer()
+            throws UnknownHostException {
+        // set cluster name
+        Settings settings = Settings.builder().put("cluster.name", "elasticsearch").build();
+
+        this.elasticsearchClient = new PreBuiltTransportClient(settings)
+                .addTransportAddress(new InetSocketTransportAddress(InetAddress.getByName(Consumer.ES_HOST), Consumer.ES_PORT));
+
+        this.parser = new JSONParser();
+
+        this.init();
     }
 
     private void init() {
@@ -41,6 +70,11 @@ public class Consumer extends Thread {
         AmazonSQSClientBuilder clientBuilder = AmazonSQSClientBuilder.standard().withCredentials(new AWSStaticCredentialsProvider(credentials));
         clientBuilder.setRegion(Regions.US_WEST_2.getName());
         sqs = clientBuilder.build();
+
+        // now setup ElasticSearch
+
+        IndicesAdminClient indicesAdminClient = this.elasticsearchClient.admin().indices();
+        indicesAdminClient.prepareCreate("twitter").get();
     }
 
     @Override
@@ -54,15 +88,21 @@ public class Consumer extends Thread {
                 ReceiveMessageRequest receiveMessageRequest = new ReceiveMessageRequest(queueUrl);
                 List<Message> messages = sqs.receiveMessage(receiveMessageRequest).getMessages();
 
-                System.out.println("Message");
-                System.out.println("MessageId:     " + messages.get(0).getMessageId());
-                System.out.println("Body:          " + messages.get(0).getBody());
+                if (messages.size() == 0) {
+                    // wait for some new messages
+                    Thread.sleep(500);
+                    continue;
+                }
 
 
-                // Delete a message
-                System.out.println("Deleting a message.\n");
-                String messageReceiptHandle = messages.get(0).getReceiptHandle();
-                sqs.deleteMessage(new DeleteMessageRequest(queueUrl, messageReceiptHandle));
+                sendToElasticsearch(messages);
+
+                for (Message msg : messages) {
+                    // Delete a message
+                    System.out.println("Deleting message with AWS id " + msg.getMessageId());
+                    String messageReceiptHandle = msg.getReceiptHandle();
+                    sqs.deleteMessage(new DeleteMessageRequest(queueUrl, messageReceiptHandle));
+                }
 
             }
         } catch (Exception e) {
@@ -70,4 +110,30 @@ public class Consumer extends Thread {
         }
 
     }
+
+    private void sendToElasticsearch(List<Message> messages) {
+        BulkRequestBuilder bulkRequest = this.elasticsearchClient.prepareBulk();
+
+        for (Message msg : messages) {
+            System.out.println("Adding message with AWS id " + msg.getMessageId() + " to ES Bulk Index request");
+            try {
+                JSONObject tweetObj = (JSONObject) this.parser.parse(msg.getBody());
+                Long tweetId = (Long) tweetObj.get("id");
+
+                bulkRequest
+                        .add(
+                                this.elasticsearchClient.prepareIndex(Consumer.INDEX_NAME, Consumer.TYPE_NAME, tweetId.toString())
+                                        .setSource(msg.getBody())
+                        );
+            } catch (ParseException e) {
+                e.printStackTrace();
+            }
+        }
+
+        BulkResponse response = bulkRequest.get();
+        if (response.hasFailures()) {
+            System.err.println("Failed to index using bulk request: " + response.buildFailureMessage());
+        }
+    }
+
 }
