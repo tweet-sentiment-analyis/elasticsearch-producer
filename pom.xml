@@ -8,10 +8,26 @@
     <artifactId>elasticsearch-producer</artifactId>
     <version>0.0.1-SNAPSHOT</version>
 
+
+    <repositories>
+        <repository>
+            <id>sonatype</id>
+            <name>Sonatype Groups</name>
+            <url>https://oss.sonatype.org/content/groups/public/</url>
+        </repository>
+    </repositories>
+
+
     <dependencies>
         <dependency>
+            <groupId>io.searchbox</groupId>
+            <artifactId>jest</artifactId>
+            <version>2.0.0</version>
+        </dependency>
+
+        <dependency>
             <groupId>org.elasticsearch.client</groupId>
-            <artifactId>transport</artifactId>
+            <artifactId>rest</artifactId>
             <version>5.1.2</version>
         </dependency>
 
