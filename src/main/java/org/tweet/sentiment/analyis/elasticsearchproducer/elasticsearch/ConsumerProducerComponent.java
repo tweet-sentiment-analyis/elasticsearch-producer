@@ -3,7 +3,7 @@ package org.tweet.sentiment.analyis.elasticsearchproducer.elasticsearch;
 import com.amazonaws.AmazonClientException;
 import com.amazonaws.auth.AWSCredentials;
 import com.amazonaws.auth.AWSStaticCredentialsProvider;
-import com.amazonaws.auth.profile.ProfileCredentialsProvider;
+import com.amazonaws.auth.EnvironmentVariableCredentialsProvider;
 import com.amazonaws.regions.Regions;
 import com.amazonaws.services.sqs.AmazonSQS;
 import com.amazonaws.services.sqs.AmazonSQSClientBuilder;
@@ -12,7 +12,6 @@ import com.amazonaws.services.sqs.model.Message;
 import com.amazonaws.services.sqs.model.ReceiveMessageRequest;
 import io.searchbox.client.JestClient;
 import io.searchbox.client.JestClientFactory;
-import io.searchbox.client.JestResult;
 import io.searchbox.client.config.HttpClientConfig;
 import io.searchbox.core.Bulk;
 import io.searchbox.core.BulkResult;
@@ -25,40 +24,36 @@ import java.io.IOException;
 import java.util.List;
 import java.util.logging.Logger;
 
-public class Consumer extends Thread {
+public class ConsumerProducerComponent extends Thread {
 
-    private static final Logger logger = Logger.getLogger(Consumer.class.getName());
+    private static final Logger logger = Logger.getLogger(ConsumerProducerComponent.class.getName());
 
     public static final String ES_INDEX_NAME = "twitter";
     public static final String ES_TYPE_NAME  = "tweet";
 
-    //    public static final String ES_HOST = "https://search-twitter-es-nhegy3p4ogvptnpu4y6zmpbj2i.us-west-2.es.amazonaws.com";
-    public static final String ES_HOST = "http://192.168.99.100";
-    public static final int    ES_PORT = 9200;
+    public static final String ES_HOST     = "ES_HOST";
+    public static final String ES_PORT     = "ES_PORT";
+    public static final String ES_USERNAME = "ES_USERNAME";
+    public static final String ES_PASSWORD = "ES_PASSWORD";
 
     private AmazonSQS  sqs;
     private JestClient elasticsearchClient;
 
-    public Consumer()
+    public ConsumerProducerComponent()
             throws IOException {
         this.init();
     }
 
     private void init()
             throws IOException {
-        /*
-         * The ProfileCredentialsProvider will return your [default]
-         * credential profile by reading from the credentials file located at
-         * (~/.aws/credentials).
-         */
-        AWSCredentials credentials = null;
+        AWSCredentials credentials;
         try {
-            credentials = new ProfileCredentialsProvider("sqs").getCredentials();
+            credentials = new EnvironmentVariableCredentialsProvider().getCredentials();
         } catch (Exception e) {
             throw new AmazonClientException(
-                    "Cannot load the credentials from the credential profiles file. " +
-                            "Please make sure that your credentials file is at the correct " +
-                            "location (~/.aws/credentials), and is in valid format.",
+                    "Cannot load the credentials from the environment. " +
+                            "Please make sure that your credentials are located in the environment variables " +
+                            "AWS_ACCESS_KEY_ID resp. AWS_SECRET_ACCESS_KEY",
                     e);
         }
 
@@ -66,12 +61,18 @@ public class Consumer extends Thread {
         clientBuilder.setRegion(Regions.US_WEST_2.getName());
         sqs = clientBuilder.build();
 
+        String esHost = System.getenv(ES_HOST);
+        int esPort = Integer.parseInt(System.getenv(ES_PORT));
+        String esUsername = System.getenv(ES_USERNAME);
+        String esPassword = System.getenv(ES_PASSWORD);
+
+        logger.info("Trying to connect to elasticsearch on " + esHost + ":" + esPort + " using " + esUsername + ":" + esPassword);
 
         // Construct a new Jest client according to configuration via factory
         JestClientFactory factory = new JestClientFactory();
         factory.setHttpClientConfig(new HttpClientConfig
-                .Builder(ES_HOST + ":" + ES_PORT)
-                .defaultCredentials("elastic", "changeme")
+                .Builder(esHost + ":" + esPort)
+                .defaultCredentials(esUsername, esPassword)
                 .multiThreaded(true)
                 //Per default this implementation will create no more than 2 concurrent connections per given route
                 .defaultMaxTotalConnectionPerRoute(1)
