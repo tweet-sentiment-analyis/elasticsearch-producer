@@ -28,13 +28,15 @@ public class ConsumerProducerComponent extends Thread {
 
     private static final Logger logger = Logger.getLogger(ConsumerProducerComponent.class.getName());
 
-    public static final String ES_INDEX_NAME = "twitter";
-    public static final String ES_TYPE_NAME  = "tweet";
+    public static final String ES_INDEX_NAME = "ES_INDEX_NAME";
+    public static final String ES_TYPE_NAME  = "ES_TYPE_NAME";
 
     public static final String ES_HOST     = "ES_HOST";
     public static final String ES_PORT     = "ES_PORT";
     public static final String ES_USERNAME = "ES_USERNAME";
     public static final String ES_PASSWORD = "ES_PASSWORD";
+
+    public static final String SQS_QUEUE_NAME = "SQS_QUEUE_NAME";
 
     private AmazonSQS  sqs;
     private JestClient elasticsearchClient;
@@ -65,6 +67,8 @@ public class ConsumerProducerComponent extends Thread {
         int esPort = Integer.parseInt(System.getenv(ES_PORT));
         String esUsername = System.getenv(ES_USERNAME);
         String esPassword = System.getenv(ES_PASSWORD);
+        String esIndex = System.getenv(ES_INDEX_NAME);
+        String esType = System.getenv(ES_TYPE_NAME);
 
         logger.info("Trying to connect to elasticsearch on " + esHost + ":" + esPort + " using " + esUsername + ":" + esPassword);
 
@@ -83,19 +87,19 @@ public class ConsumerProducerComponent extends Thread {
 
         // check whether the index and the type already exist
         // create otherwise
-        logger.info("Checking whether ES index " + ES_INDEX_NAME + " exists...");
-        boolean indexExists = this.elasticsearchClient.execute(new IndicesExists.Builder(ES_INDEX_NAME).build()).isSucceeded();
+        logger.info("Checking whether ES index " + esIndex + " exists...");
+        boolean indexExists = this.elasticsearchClient.execute(new IndicesExists.Builder(esIndex).build()).isSucceeded();
         logger.info("Index exists: " + indexExists);
 
         if (! indexExists) {
-            logger.info("Creating index " + ES_INDEX_NAME);
-            this.elasticsearchClient.execute(new CreateIndex.Builder(ES_INDEX_NAME).build());
+            logger.info("Creating index " + esIndex);
+            this.elasticsearchClient.execute(new CreateIndex.Builder(esIndex).build());
         }
 
         // create mapping
         PutMapping putMapping = new PutMapping.Builder(
-                ES_INDEX_NAME,
-                ES_TYPE_NAME,
+                esIndex,
+                esType,
                 "{\n" +
                         "  \"properties\": {\n" +
                         "    \"id\": {\n" +
@@ -123,11 +127,14 @@ public class ConsumerProducerComponent extends Thread {
     @Override
     public void run() {
         // Get twitter message from queue
+        String queueName = System.getenv(SQS_QUEUE_NAME);
+        logger.info("Using queue '" + queueName + "' for sending tweets to");
+
         try {
             while (true) {
                 // Receive messages
                 //System.out.println("Receiving messages from MyQueue.\n");
-                String queueUrl = sqs.getQueueUrl("analyised-tweets").getQueueUrl();
+                String queueUrl = sqs.getQueueUrl(queueName).getQueueUrl();
                 ReceiveMessageRequest receiveMessageRequest = new ReceiveMessageRequest(queueUrl);
                 List<Message> messages = sqs.receiveMessage(receiveMessageRequest).getMessages();
 
@@ -155,10 +162,13 @@ public class ConsumerProducerComponent extends Thread {
     }
 
     private void sendToElasticsearch(List<Message> messages) {
+        String esIndex = System.getenv(ES_INDEX_NAME);
+        String esType = System.getenv(ES_TYPE_NAME);
+
         //index documents
         Bulk.Builder bulkBuilder = new Bulk.Builder()
-                .defaultIndex(ES_INDEX_NAME)
-                .defaultType(ES_TYPE_NAME);
+                .defaultIndex(esIndex)
+                .defaultType(esType);
 
 
         for (Message msg : messages) {
