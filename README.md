@@ -1,6 +1,6 @@
 # Elasticsearch Consumer Producer
 
-This component fetches messages from a message queue and stores in Elasticsearch. 
+This component fetches messages from a message queue and stores them in Elasticsearch. 
 
 ## Build and Deploy
 In order to build this project as well as deploy a new image to docker hub, perform the following steps:
